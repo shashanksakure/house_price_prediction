@@ -5,15 +5,24 @@ from flask import Flask, request, render_template_string
 
 app = Flask(__name__)
 
-# Construct absolute path to linear-model.pkl
+# Absolute path resolution
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, 'linear-model.pkl')
 
-# Load the trained linear model
-with open(MODEL_PATH, 'rb') as f:
-    model = pickle.load(f)
+# Attempt to load the trained linear model gracefully
+model = None
+model_error = None
 
-# Model feature list
+if os.path.exists(MODEL_PATH):
+    try:
+        with open(MODEL_PATH, 'rb') as f:
+            model = pickle.load(f)
+    except Exception as e:
+        model_error = f"Error unpickling model: {str(e)}"
+else:
+    model_error = f"Model file not found at path: {MODEL_PATH}. Make sure 'linear-model.pkl' is committed to Git."
+
+# Feature list based on model architecture
 FEATURE_NAMES = [
     "number of bedrooms",
     "number of bathrooms",
@@ -51,6 +60,8 @@ HTML_TEMPLATE = """
             --text-muted: #94a3b8;
             --border-color: #334155;
             --input-bg: #0f172a;
+            --error-bg: rgba(239, 68, 68, 0.1);
+            --error-border: #ef4444;
         }
 
         * {
@@ -76,7 +87,7 @@ HTML_TEMPLATE = """
             background: var(--card-bg);
             border-radius: 16px;
             padding: 2.5rem;
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
             border: 1px solid var(--border-color);
         }
 
@@ -88,7 +99,6 @@ HTML_TEMPLATE = """
         .header h1 {
             font-size: 2rem;
             font-weight: 700;
-            letter-spacing: -0.025em;
             margin-bottom: 0.5rem;
             background: linear-gradient(135deg, #a5b4fc 0%, #6366f1 100%);
             -webkit-background-clip: text;
@@ -98,6 +108,17 @@ HTML_TEMPLATE = """
         .header p {
             color: var(--text-muted);
             font-size: 0.95rem;
+        }
+
+        .alert-error {
+            background: var(--error-bg);
+            border: 1px solid var(--error-border);
+            color: #fca5a5;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            font-size: 0.9rem;
+            text-align: center;
         }
 
         .grid-form {
@@ -146,15 +167,16 @@ HTML_TEMPLATE = """
             font-size: 1rem;
             font-weight: 600;
             cursor: pointer;
-            transition: background-color 0.2s ease-in-out, transform 0.1s ease;
+            transition: background-color 0.2s ease-in-out;
         }
 
         .btn-submit:hover {
             background-color: var(--accent-hover);
         }
 
-        .btn-submit:active {
-            transform: scale(0.99);
+        .btn-submit:disabled {
+            background-color: var(--border-color);
+            cursor: not-allowed;
         }
 
         .result-card {
@@ -164,7 +186,6 @@ HTML_TEMPLATE = """
             border: 1px solid var(--accent);
             border-radius: 12px;
             text-align: center;
-            animation: fadeIn 0.4s ease-out;
         }
 
         .result-card h2 {
@@ -179,11 +200,6 @@ HTML_TEMPLATE = """
             color: #38bdf8;
             margin-top: 0.25rem;
         }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
     </style>
 </head>
 <body>
@@ -192,6 +208,12 @@ HTML_TEMPLATE = """
             <h1>House Price Prediction</h1>
             <p>Enter property metrics below to estimate value</p>
         </div>
+
+        {% if model_error %}
+        <div class="alert-error">
+            <strong>Deployment Issue:</strong> {{ model_error }}
+        </div>
+        {% endif %}
 
         <form method="POST" action="/predict" class="grid-form">
             {% for feature in features %}
@@ -208,7 +230,9 @@ HTML_TEMPLATE = """
             </div>
             {% endfor %}
 
-            <button type="submit" class="btn-submit">Calculate Estimated Value</button>
+            <button type="submit" class="btn-submit" {% if model_error %}disabled{% endif %}>
+                Calculate Estimated Value
+            </button>
         </form>
 
         {% if prediction is not none %}
@@ -224,17 +248,38 @@ HTML_TEMPLATE = """
 
 @app.route('/', methods=['GET'])
 def home():
-    return render_template_string(HTML_TEMPLATE, features=FEATURE_NAMES, prediction=None, form_data={})
+    return render_template_string(
+        HTML_TEMPLATE, 
+        features=FEATURE_NAMES, 
+        prediction=None, 
+        form_data={}, 
+        model_error=model_error
+    )
 
 @app.route('/predict', methods=['POST'])
 def predict():
+    if model is None:
+        return render_template_string(
+            HTML_TEMPLATE, 
+            features=FEATURE_NAMES, 
+            prediction=None, 
+            form_data=request.form, 
+            model_error=model_error
+        )
+
     try:
         form_data = request.form
         features_input = [float(form_data[f'feature_{i}']) for i in range(len(FEATURE_NAMES))]
         prediction = model.predict([features_input])[0]
-        return render_template_string(HTML_TEMPLATE, features=FEATURE_NAMES, prediction=prediction, form_data=form_data)
+        return render_template_string(
+            HTML_TEMPLATE, 
+            features=FEATURE_NAMES, 
+            prediction=prediction, 
+            form_data=form_data, 
+            model_error=None
+        )
     except Exception as e:
-        return f"Error processing request: {str(e)}", 400
+        return f"Error processing prediction: {str(e)}", 400
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

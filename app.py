@@ -1,14 +1,19 @@
+import os
 import pickle
 import numpy as np
 from flask import Flask, request, render_template_string
 
 app = Flask(__name__)
 
+# Construct absolute path to linear-model.pkl
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, 'linear-model.pkl')
+
 # Load the trained linear model
-with open('linear-model.pkl', 'rb') as f:
+with open(MODEL_PATH, 'rb') as f:
     model = pickle.load(f)
 
-# Extract feature names directly from the model if available, otherwise use default list
+# Model feature list
 FEATURE_NAMES = [
     "number of bedrooms",
     "number of bathrooms",
